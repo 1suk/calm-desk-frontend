@@ -11,3 +11,9 @@ export const refreshAccessToken = async () => {
   // console.log("AccessToken 재발급 API");
   return response.data.accessToken;
 };
+
+export const logout = async (accessToken) => {
+  await authClient.post("/auth/logout", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+};

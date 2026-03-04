@@ -1,3 +1,4 @@
+import { logout } from "../../api/authApi";
 import { decodeToken } from "../../utils/jwtUtils";
 import { tokenManager } from "../../utils/tokenManager";
 
@@ -14,15 +15,14 @@ export const createAuthSlice = (set) => ({
     const decoded = user.token ? decodeToken(user.token) : null;
     const role =
       user.role || (user.token ? decodeToken(user.token)?.role : null);
-   
-       const companyId = user.companyId || decoded?.companyId;
-      const isAdmin = role === "ADMIN";
+
+    const companyId = user.companyId || decoded?.companyId;
+    const isAdmin = role === "ADMIN";
 
     // console.log("=== 로그인 데이터 확인 ===");
     // console.log("원본 user 객체:", user);
     // console.log("디코딩된 토큰:", decoded);
     // console.log("최종 추출된 companyId:", companyId);
-
 
     set({
       user: {
@@ -35,21 +35,28 @@ export const createAuthSlice = (set) => ({
     });
   },
 
-  logout: () => {
-    tokenManager.clearAccessToken();
+  logout: async () => {
+    try {
+      const accessToken = tokenManager.getAccessToken();
+      if (accessToken) await logout(accessToken);
+    } catch (error) {
+      console.error("로그아웃 실패:", error);
+    } finally {
+      tokenManager.clearAccessToken();
 
-    set({
-      user: null,
-      isAdminMode: false,
-      attendance: {
-        isClockedIn: false,
-        isAway: false,
-        isCoolDown: false,
-        coolDownStartTime: null,
-      },
-      ui: { departmentFilter: "전체" },
-    });
+      set({
+        user: null,
+        isAdminMode: false,
+        attendance: {
+          isClockedIn: false,
+          isAway: false,
+          isCoolDown: false,
+          coolDownStartTime: null,
+        },
+        ui: { departmentFilter: "전체" },
+      });
 
-    window.location.href = "/login";
+      window.location.href = "/login";
+    }
   },
 });

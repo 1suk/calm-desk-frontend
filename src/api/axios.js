@@ -3,8 +3,21 @@ import { tokenManager } from "../utils/tokenManager";
 import { refreshAccessToken } from "./authApi";
 import { API_URL } from "../Config";
 
+const getBaseURL = () => {
+  if (typeof API_URL !== "undefined" && API_URL) return `${API_URL}/api`;
+
+  // 만약 API_URL이 아직 정의되지 않았다면 현재 도메인 기반으로 즉석 생성
+  if (
+    window.location.hostname === "calmdesk.site" ||
+    window.location.hostname === "www.calmdesk.site"
+  ) {
+    return "https://api.calmdesk.site/api";
+  }
+  return "http://localhost:8080/api";
+};
+
 const apiClient = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: getBaseURL(),
   headers: {
     "Content-Type": "application/json",
   },
@@ -32,6 +45,17 @@ const handleRefresh = async () => {
   } finally {
     tokenManager.setRefreshing(false);
   }
+};
+
+let isDuplicateLoginHandled = false;
+
+const handleDuplicateLogin = () => {
+  if (isDuplicateLoginHandled) return;
+  isDuplicateLoginHandled = true;
+
+  tokenManager.clearAccessToken();
+  alert("다른 기기에서 로그인되었습니다. 다시 로그인해주세요.");
+  window.location.href = "/login";
 };
 
 apiClient.interceptors.request.use(
@@ -62,7 +86,16 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response?.status !== 401 || originalRequest._retry) {
+    if (error.response?.status !== 401) {
+      return Promise.reject(error);
+    }
+
+    if (error.response?.data?.code === "DUPLICATE_LOGIN") {
+      handleDuplicateLogin();
+      return Promise.reject(error);
+    }
+
+    if (originalRequest._retry) {
       return Promise.reject(error);
     }
 

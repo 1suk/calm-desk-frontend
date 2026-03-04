@@ -1,3 +1,5 @@
+import axios from '../../api/axios';
+
 export const createChatSlice = (set, get) => ({
     chat: {
         chatRooms: [],
@@ -10,6 +12,20 @@ export const createChatSlice = (set, get) => ({
         setChatRooms: (rooms) => set((state) => ({
             chat: { ...state.chat, chatRooms: rooms }
         })),
+
+        // 채팅방 목록 서버에서 새로고침
+        fetchChatRooms: async () => {
+            try {
+                const response = await axios.get('/chat/rooms');
+                set((state) => ({
+                    chat: { ...state.chat, chatRooms: response.data }
+                }));
+                console.log('[fetchChatRooms] Chat rooms refreshed from server.');
+            } catch (error) {
+                console.error('[fetchChatRooms] Failed to refresh chat rooms:', error);
+            }
+        },
+
         setCurrentRoomId: (roomId) => set((state) => ({
             chat: { ...state.chat, currentRoomId: roomId }
         })),
@@ -106,22 +122,58 @@ export const createChatSlice = (set, get) => ({
                 )
             }
         })),
-        updateChatList: (message) => set((state) => ({
-            chat: {
-                ...state.chat,
-                chatRooms: state.chat.chatRooms.map(room =>
-                    room.roomId === message.roomId
-                        ? {
-                            ...room,
-                            lastMessageContent: message.content,
-                            lastMessageTime: message.createdDate,
-                            unreadCount: state.chat.currentRoomId !== message.roomId
-                                ? (room.unreadCount || 0) + 1
-                                : 0
-                        }
-                        : room
-                ).sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime))
+        updateChatList: (message) => set((state) => {
+            // 날짜 처리 헬퍼 (배열/문자열 모두 대응)
+            const parseDate = (d) => {
+                if (Array.isArray(d)) return new Date(d[0], d[1] - 1, d[2], d[3], d[4], d[5]);
+                return new Date(d);
+            };
+
+            const roomExists = state.chat.chatRooms.some(r => r.roomId === message.roomId);
+
+            let updatedRooms;
+            if (!roomExists) {
+                console.log(`[updateChatList] New room detected: ${message.roomId}. Adding to state...`);
+                get().chat.fetchChatRooms();
+
+                const newRoom = {
+                    roomId: message.roomId,
+                    name: message.roomName || `Room ${message.roomId}`,
+                    lastMessageContent: message.content,
+                    lastMessageTime: message.createdDate,
+                    unreadCount: message.messageType === 'TALK' ? 1 : 0
+                };
+                updatedRooms = [newRoom, ...state.chat.chatRooms];
+            } else {
+                updatedRooms = state.chat.chatRooms.map(room => {
+                    if (room.roomId !== message.roomId) return room;
+
+                    const myId = String(state.user?.memberId || state.user?.id || "");
+                    const isMe = myId === String(message.senderId);
+                    const isCurrentRoom = state.chat.currentRoomId === message.roomId;
+
+                    const shouldIncrement = message.messageType === 'TALK' && !isMe && !isCurrentRoom;
+                    const newUnreadCount = shouldIncrement ? (room.unreadCount || 0) + 1 : (room.unreadCount || 0);
+
+                    const msgDate = parseDate(message.createdDate);
+                    const roomDate = parseDate(room.lastMessageTime);
+                    const isNewerOrSame = !room.lastMessageTime || msgDate >= roomDate;
+
+                    return {
+                        ...room,
+                        lastMessageContent: isNewerOrSame ? message.content : room.lastMessageContent,
+                        lastMessageTime: isNewerOrSame ? message.createdDate : room.lastMessageTime,
+                        unreadCount: newUnreadCount
+                    };
+                });
             }
-        })),
+
+            return {
+                chat: {
+                    ...state.chat,
+                    chatRooms: updatedRooms.sort((a, b) => parseDate(b.lastMessageTime) - parseDate(a.lastMessageTime))
+                }
+            };
+        }),
     }
 });

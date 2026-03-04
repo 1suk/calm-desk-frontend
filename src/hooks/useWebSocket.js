@@ -37,7 +37,17 @@ const useWebSocket = () => {
             return;
         }
 
-        const brokerURL = API_URL.replace('http', 'ws') + '/ws-stomp';
+        // SAFE API_URL resolve
+        const SAFE_API_URL = typeof API_URL !== 'undefined' && API_URL
+            ? API_URL
+            : (window.location.hostname === "calmdesk.cloud" || window.location.hostname === "www.calmdesk.cloud"
+                ? "https://api.calmdesk.cloud"
+                : "http://localhost:8080");
+
+        const brokerURL = SAFE_API_URL.startsWith('https')
+            ? SAFE_API_URL.replace('https', 'wss') + '/ws-stomp'
+            : SAFE_API_URL.replace('http', 'ws') + '/ws-stomp';
+
 
         const client = new Client({
             brokerURL: brokerURL,
@@ -145,29 +155,58 @@ const useWebSocket = () => {
 
         console.log(`Subscribing to user topic: ${user.email}`);
         let userSubscription;
-        const { updateChatList } = useStore.getState().chat;
+        let shopSubscription; // 상점 업데이트용 추가
+
+        // Zustand 스토어는 평탄화되어 있으므로 직접 추출합니다.
+        const { updateShopItems, setItems } = useStore.getState();
 
         try {
             userSubscription = stompClient.subscribe(
                 `/sub/chat/user/${user.email}`,
                 (message) => {
+                    console.log('[useWebSocket] User Topic Message Received:', message.body);
                     try {
                         const receivedMsg = JSON.parse(message.body);
-                        updateChatList(receivedMsg);
+                        const { updateChatList } = useStore.getState().chat;
+                        if (updateChatList) {
+                            updateChatList(receivedMsg);
+                        } else {
+                            console.error('[useWebSocket] updateChatList function not found in store');
+                        }
                     } catch (e) {
                         console.error('JSON Parse Error in user topic:', e);
                     }
                 }
             );
+
+            // 💡 상점 업데이트 채널 구독 (/sub/shop/company/{companyId})
+            if (user.companyId) {
+                const companyId = parseInt(String(user.companyId).split(':')[0], 10);
+                console.log(`Subscribing to shop topic: /sub/shop/company/${companyId}`);
+                shopSubscription = stompClient.subscribe(
+                    `/sub/shop/company/${companyId}`,
+                    (message) => {
+                        try {
+                            const items = JSON.parse(message.body);
+                            console.log('📦 Shop Update Received via WebSocket:', items);
+
+                            // 1. 직원용 포인트몰 데이터 갱신
+                            if (updateShopItems) updateShopItems(items);
+                            // 2. 관리자용 기프티콘 관리 데이터 갱신
+                            if (setItems) setItems(items);
+                        } catch (e) {
+                            console.error('JSON Parse Error in shop topic:', e);
+                        }
+                    }
+                );
+            }
         } catch (error) {
-            console.error("User Subscription failed:", error);
+            console.error("Subscription failed:", error);
         }
 
         return () => {
             if (userSubscription) userSubscription.unsubscribe();
-        };
-        return () => {
-            if (userSubscription) userSubscription.unsubscribe();
+            if (shopSubscription) shopSubscription.unsubscribe();
         };
     }, [isConnected, stompClient, user?.email]);
 
